@@ -1,4 +1,8 @@
 opencv-python
-qreader
+git+https://github.com/wmetcalf/qrdet.git
+git+https://github.com/wmetcalf/QReader.git
 opencv-contrib-python
 zxing-cpp
+fastapi
+uvicorn
+python-magic
