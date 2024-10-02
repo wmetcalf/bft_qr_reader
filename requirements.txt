@@ -6,3 +6,5 @@ zxing-cpp
 fastapi
 uvicorn
 python-magic
+pillow
+python-multipart

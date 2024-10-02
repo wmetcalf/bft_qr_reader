@@ -18,6 +18,7 @@ import os
 import magic
 import tempfile
 import subprocess
+import multiprocessing
 from contextlib import asynccontextmanager
 
 # Set up logging
@@ -34,9 +35,10 @@ we_chat_model_dir = None
 # app = FastAPI()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global we_chat_model_dir
     logger.info("Lifespan event started.")
     # You can replace 'path_to_wechat_models' with the actual path to your models
-    app.state.qr_code_reader = BFTQRCodeReader(wechat_model_dir=app.state.we_chat_model_dir)
+    app.state.qr_code_reader = BFTQRCodeReader(wechat_model_dir="./models/")
     yield
 
 
@@ -45,22 +47,23 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    # Check if qr_code_reader is available in app.state
     if not hasattr(app.state, "qr_code_reader"):
         logger.error("QR code reader is not initialized in app.state!")
         raise HTTPException(status_code=500, detail="QR code reader is not initialized.")
 
     qr_code_reader = app.state.qr_code_reader
 
-    # Save the uploaded file temporarily
-    temp_file_path = f"./temp_{file.filename}"
-    with open(temp_file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_file_path = os.path.join(temp_dir, file.filename)
+        with open(temp_file_path, "wb") as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
 
-    image = cv2.imread(temp_file_path)
-    success = qr_code_reader.enhance_and_decode(temp_file_path, ".", False, False)
-    os.remove(temp_file_path)
+        try:
+            success = qr_code_reader.enhance_and_decode(temp_file_path, temp_dir, False, False)
+        finally:
+            pass
 
+    # Return the result of the QR code detection
     if success:
         return JSONResponse({"status": "QR code detected", "message": qr_code_reader.results})
     else:
@@ -314,39 +317,23 @@ class BFTQRCodeReader:
         return img
 
     def scale_image_with_aspect_ratio(self, image, scale_factor=None, width=None, height=None):
-        """
-        Scales the input image while maintaining the aspect ratio. You can specify a scale factor,
-        or a target width or height, and the other dimension will be adjusted accordingly.
-
-        :param image: The image to be scaled.
-        :param scale_factor: A factor to scale the image (optional).
-        :param width: The desired width (optional).
-        :param height: The desired height (optional).
-        :return: The scaled image with the aspect ratio preserved.
-        """
-        # Ensure that either scale_factor or one dimension (width/height) is provided
         if scale_factor is None and width is None and height is None:
             raise ValueError("You must provide either a scale factor, a target width, or a target height.")
 
-        # Get the original dimensions of the image
         original_height, original_width = image.shape[:2]
 
         if scale_factor is not None:
-            # Calculate new dimensions based on the scale factor
             new_width = int(original_width * scale_factor)
             new_height = int(original_height * scale_factor)
         elif width is not None:
-            # Calculate the height while maintaining aspect ratio
             aspect_ratio = original_height / original_width
             new_width = width
             new_height = int(width * aspect_ratio)
         elif height is not None:
-            # Calculate the width while maintaining aspect ratio
             aspect_ratio = original_width / original_height
             new_height = height
             new_width = int(height * aspect_ratio)
 
-        # Resize the image using the calculated dimensions
         scaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
         return scaled_image
@@ -355,8 +342,8 @@ class BFTQRCodeReader:
         self.results = []
         if save_matched:
             self.save_matched = save_matched
-        if not os.path.exists(args.output):
-            os.makedirs(args.output)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         if os.path.isfile(path):
             image_paths = [path]
         elif os.path.isdir(path):
@@ -388,7 +375,7 @@ class BFTQRCodeReader:
                             image = cv2.imread(temp_png_path)
                             image_path = temp_png_path
                         except Exception as e:
-                            logger.debug(f"failed to convert svg/wmf to PNG {e}")
+                            logger.debug(f"failed to convert wmf to PNG {e}")
                     elif mime_type == "image/svg+xml":
                         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_png:
                             temp_png_path = temp_png.name
@@ -570,7 +557,8 @@ class BFTQRCodeReader:
         return self.results
 
 
-if __name__ == "__main__":
+def main():
+    global we_chat_model_dir
     parser = argparse.ArgumentParser(description="Enhance and decode QR codes from an image using multiple detectors.")
     parser.add_argument("-i", "--input", required=False, help="Path to the input image")
     parser.add_argument("-o", "--output", required=False, default="/tmp", help="Directory to save the output images. Default is /tmp/ ")
@@ -603,12 +591,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--webserver", action="store_true", help="Run as webserver")
     parser.add_argument("--port", type=int, default=1111, help="Port for the webserver")
+    parser.add_argument("--recycle_workers", type=int, default=20, help="Recycle workers after this many requests default is 20")
+    parser.add_argument("--workers", type=int, default=multiprocessing.cpu_count(), help="how many workers should we use default is 1")
     args = parser.parse_args()
     we_chat_model_dir = args.model_dir
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
     if args.webserver:
-        app.state.we_chat_model_dir = args.model_dir  # Store the model dir in app state
-        uvicorn.run(app, host="0.0.0.0", port=args.port)
+        we_chat_model_dir = args.model_dir
+        uvicorn.run("bft_qr_reader:app", host="0.0.0.0", port=args.port, limit_max_requests=args.recycle_workers, workers=args.workers)
     else:
         if args.input:
             qr_code_reader = BFTQRCodeReader(we_chat_model_dir, args.methods)
@@ -620,3 +610,7 @@ if __name__ == "__main__":
             logger.debug(results)
         else:
             logger.debug("You must specify an input argument")
+
+
+if __name__ == "__main__":
+    main()
