@@ -3,7 +3,7 @@ Blunt Force Trauma QR Reader. Tries a bunch of different methods with mutations 
 
 # Add req Packages
 ```
-sudo apt-get install -y libzbar0 inkspace librsvg2-bin
+sudo apt-get install -y libzbar0 inkscape librsvg2-bin
 pip3 install . 
 ```
 
