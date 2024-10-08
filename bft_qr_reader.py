@@ -20,6 +20,10 @@ import tempfile
 import subprocess
 import multiprocessing
 from contextlib import asynccontextmanager
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+executor = ThreadPoolExecutor()
 
 # Set up logging
 
@@ -58,10 +62,16 @@ async def upload_file(file: UploadFile = File(...)):
         with open(temp_file_path, "wb") as temp_file:
             shutil.copyfileobj(file.file, temp_file)
 
+        # Function to run the QR code reader in a separate thread
+        def run_qr_code_reader():
+            return qr_code_reader.enhance_and_decode(temp_file_path, temp_dir, False, False)
+
         try:
-            success = qr_code_reader.enhance_and_decode(temp_file_path, temp_dir, False, False)
-        finally:
-            pass
+            # Use asyncio.wait_for to apply a timeout for the synchronous task
+            success = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(executor, run_qr_code_reader), timeout=45.0)
+        except asyncio.TimeoutError:
+            logger.error("QR code detection timed out.")
+            raise HTTPException(status_code=408, detail="QR code detection timed out.")
 
     # Return the result of the QR code detection
     if success:
@@ -89,7 +99,7 @@ async def upload_form():
 
 
 class BFTQRCodeReader:
-    def __init__(self, wechat_model_dir, methods_to_try="zxing,opencv,wechat,qreader"):
+    def __init__(self, wechat_model_dir="./models/", methods_to_try="zxing,opencv,wechat,qreader"):
         self.qreader = QReader(model_size="s")
         detect_prototxt = os.path.join(wechat_model_dir, "detect.prototxt")
         detect_caffemodel = os.path.join(wechat_model_dir, "detect.caffemodel")
@@ -603,11 +613,12 @@ def main():
         if args.input:
             qr_code_reader = BFTQRCodeReader(we_chat_model_dir, args.methods)
             results = qr_code_reader.enhance_and_decode(args.input, args.output, args.bft, args.save_matched)
+            new_results = {"message": results}
             if args.json_dump:
                 output = os.path.join(args.output, "bft_dump.json")
                 with open(output, "w") as f:
-                    f.write(json.dumps(results, indent=4))
-            logger.debug(results)
+                    f.write(json.dumps(new_results, indent=4))
+            logger.debug(new_results)
         else:
             logger.debug("You must specify an input argument")
 
