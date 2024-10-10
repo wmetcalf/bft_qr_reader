@@ -13,10 +13,8 @@ setup(
         'python-magic',
         'pillow',
         'python-multipart',
-    ],
-    dependency_links=[
-        'https://github.com/wmetcalf/qrdet.git#egg=qrdet',
-        'https://github.com/wmetcalf/QReader.git#egg=QReader'
+        'qrdet @ git+https://github.com/wmetcalf/qrdet.git',
+        'QReader @ git+https://github.com/wmetcalf/QReader.git',        
     ],
     package_data={
         'bft_qr_reader': ['models/*']
