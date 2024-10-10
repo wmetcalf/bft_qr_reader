@@ -35,6 +35,12 @@ app = FastAPI()
 qr_code_reader = None
 we_chat_model_dir = None
 
+def get_model_dir(args_model_dir=None):
+    if args_model_dir:
+        return args_model_dir
+    else:
+        package_dir = os.path.dirname(__file__)
+        return os.path.join(package_dir, 'models')
 
 # app = FastAPI()
 @asynccontextmanager
@@ -42,7 +48,7 @@ async def lifespan(app: FastAPI):
     global we_chat_model_dir
     logger.info("Lifespan event started.")
     # You can replace 'path_to_wechat_models' with the actual path to your models
-    app.state.qr_code_reader = BFTQRCodeReader(wechat_model_dir="./models/")
+    app.state.qr_code_reader = BFTQRCodeReader(wechat_model_dir=get_model_dir())
     yield
 
 
@@ -572,7 +578,7 @@ def main():
     parser = argparse.ArgumentParser(description="Enhance and decode QR codes from an image using multiple detectors.")
     parser.add_argument("-i", "--input", required=False, help="Path to the input image")
     parser.add_argument("-o", "--output", required=False, default="/tmp", help="Directory to save the output images. Default is /tmp/ ")
-    parser.add_argument("--model_dir", required=True, help="Directory containing the WeChat QR code model files")
+    parser.add_argument("--model_dir", type=str, help="Directory containing the WeChat QR code model files")
     parser.add_argument("--methods", required=False, default="zxing,opencv,wechat,qreader")
     parser.add_argument(
         "-b",
@@ -595,7 +601,7 @@ def main():
         "-l",
         "--log_level",
         required=False,
-        default="INFO",
+        default="DEBUG",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Set the logging level. Default is INFO.",
     )
@@ -604,11 +610,10 @@ def main():
     parser.add_argument("--recycle_workers", type=int, default=20, help="Recycle workers after this many requests default is 20")
     parser.add_argument("--workers", type=int, default=multiprocessing.cpu_count(), help="how many workers should we use default is 1")
     args = parser.parse_args()
-    we_chat_model_dir = args.model_dir
+    we_chat_model_dir = get_model_dir(args.model_dir)    
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
     if args.webserver:
-        we_chat_model_dir = args.model_dir
-        uvicorn.run("bft_qr_reader:app", host="0.0.0.0", port=args.port, limit_max_requests=args.recycle_workers, workers=args.workers)
+        uvicorn.run("bft_qr_reader.bft_qr_reader:app", host="0.0.0.0", port=args.port, limit_max_requests=args.recycle_workers, workers=args.workers)
     else:
         if args.input:
             qr_code_reader = BFTQRCodeReader(we_chat_model_dir, args.methods)
