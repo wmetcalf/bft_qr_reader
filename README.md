@@ -4,12 +4,17 @@ Blunt Force Trauma QR Reader. Tries a bunch of different methods with mutations 
 # Add req Packages
 ```
 sudo apt-get install -y libzbar0 inkscape librsvg2-bin
+pip3 install git+https://github.com/wmetcalf/bft_qr_reader.git
+
+or
+
 pip install -r requirements.txt
 ```
 
 # Usage
 ```
-usage: bft_qr_reader.py [-h] [-i INPUT] [-o OUTPUT] --model_dir MODEL_DIR [--methods METHODS] [-b] [-s] [-j] [-l {DEBUG,INFO,WARNING,ERROR,CRITICAL}] [--webserver] [--port PORT]
+bft_qr_reader [-h] [-i INPUT] [-o OUTPUT] [--model_dir MODEL_DIR] [--methods METHODS] [-b] [-s] [-j] [-l {DEBUG,INFO,WARNING,ERROR,CRITICAL}] [--webserver] [--port PORT]
+                     [--recycle_workers RECYCLE_WORKERS] [--workers WORKERS]
 
 Enhance and decode QR codes from an image using multiple detectors.
 
@@ -29,5 +34,7 @@ options:
                         Set the logging level. Default is INFO.
   --webserver           Run as webserver
   --port PORT           Port for the webserver
-
+  --recycle_workers RECYCLE_WORKERS
+                        Recycle workers after this many requests default is 20
+  --workers WORKERS     how many workers should we use default is 1
 ```
