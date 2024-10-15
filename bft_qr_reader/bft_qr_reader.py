@@ -35,12 +35,14 @@ app = FastAPI()
 qr_code_reader = None
 we_chat_model_dir = None
 
+
 def get_model_dir(args_model_dir=None):
     if args_model_dir:
         return args_model_dir
     else:
         package_dir = os.path.dirname(__file__)
-        return os.path.join(package_dir, 'models')
+        return os.path.join(package_dir, "models")
+
 
 # app = FastAPI()
 @asynccontextmanager
@@ -105,8 +107,18 @@ async def upload_form():
 
 
 class BFTQRCodeReader:
-    def __init__(self, wechat_model_dir="./models/", methods_to_try="zxing,opencv,wechat,qreader"):
+    def __init__(self, wechat_model_dir=get_model_dir(), methods_to_try="zxing,opencv,wechat,qreader"):
         self.qreader = QReader(model_size="s")
+        if not wechat_model_dir:
+            logger.debug("wechat model dir does not exists going to try to resolve it on our own")
+            wechat_model_dir = get_model_dir()
+            if os.path.exists(wechat_model_dir):
+                logger.debug(f"found wehchat models in f{wechat_model_dir}")
+        elif we_chat_model_dir and not os.path.exists(we_chat_model_dir):
+            wechat_model_dir = get_model_dir()
+            if os.path.exists(wechat_model_dir):
+                logger.debug(f"found wehchat models in f{wechat_model_dir}")
+
         detect_prototxt = os.path.join(wechat_model_dir, "detect.prototxt")
         detect_caffemodel = os.path.join(wechat_model_dir, "detect.caffemodel")
         sr_prototxt = os.path.join(wechat_model_dir, "sr.prototxt")
@@ -610,10 +622,12 @@ def main():
     parser.add_argument("--recycle_workers", type=int, default=20, help="Recycle workers after this many requests default is 20")
     parser.add_argument("--workers", type=int, default=multiprocessing.cpu_count(), help="how many workers should we use default is 1")
     args = parser.parse_args()
-    we_chat_model_dir = get_model_dir(args.model_dir)    
+    we_chat_model_dir = get_model_dir(args.model_dir)
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
     if args.webserver:
-        uvicorn.run("bft_qr_reader.bft_qr_reader:app", host="0.0.0.0", port=args.port, limit_max_requests=args.recycle_workers, workers=args.workers)
+        uvicorn.run(
+            "bft_qr_reader.bft_qr_reader:app", host="0.0.0.0", port=args.port, limit_max_requests=args.recycle_workers, workers=args.workers
+        )
     else:
         if args.input:
             qr_code_reader = BFTQRCodeReader(we_chat_model_dir, args.methods)
