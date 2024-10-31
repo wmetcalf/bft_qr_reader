@@ -22,6 +22,7 @@ import multiprocessing
 from contextlib import asynccontextmanager
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 
 executor = ThreadPoolExecutor()
 
@@ -366,6 +367,49 @@ class BFTQRCodeReader:
 
         return scaled_image
 
+    def see_through_check(self, path):
+        image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if image is not None and image.shape[2] == 4:
+            alpha_channel = image[:, :, 3]
+            has_transparency = np.any(alpha_channel < 255)
+            return has_transparency, image
+        return False, image
+
+    def will_needs_invisalign(self, image):
+        rgb_image = image[:, :, :3]
+        alpha_channel = image[:, :, 3]
+        non_transparent_pixels = rgb_image[alpha_channel > 0]
+        brightness = np.mean(0.299 * non_transparent_pixels[:, 0] + 0.587 * non_transparent_pixels[:, 1] + 0.114 * non_transparent_pixels[:, 2])
+        dark_image = brightness < 128
+        color_counts = Counter(map(tuple, non_transparent_pixels))
+        colors_in_image = {color for color, _ in color_counts.most_common(5)}
+
+        come_to_the_light = [
+            (255, 255, 255),
+            (255, 255, 224),
+            (240, 248, 255),
+            (245, 245, 245),
+            (255, 240, 245),
+        ]
+
+        follow_u_into_the_dark = [
+            (0, 0, 0),
+            (0, 0, 128),
+            (105, 105, 105),
+            (47, 79, 79),
+            (128, 0, 128),
+        ]
+
+        candidate_colors = come_to_the_light if dark_image else follow_u_into_the_dark
+        fill_color = next((color for color in candidate_colors if color not in colors_in_image), (255, 255, 255) if dark_image else (0, 0, 0))
+
+        background = np.full((*image.shape[:2], 3), fill_color, dtype=np.uint8)
+
+        invisalign = np.where(alpha_channel[:, :, None] > 0, rgb_image, background)
+
+        invisalign_bgr = cv2.cvtColor(invisalign, cv2.COLOR_RGB2BGR)
+        return invisalign_bgr
+
     def enhance_and_decode(self, path, output_dir, bft, save_matched=False):
         self.results = []
         if save_matched:
@@ -383,6 +427,7 @@ class BFTQRCodeReader:
         for image_path in image_paths:
             try:
                 image = None
+                image_with_alpha = None
                 roid_image = None
                 have_roids = False
                 mime_type = magic.from_file(image_path, mime=True)
@@ -391,6 +436,7 @@ class BFTQRCodeReader:
                 qr_detections = None
                 image_copy = None
                 grey = None
+                has_alpha = False
                 if mime_type.startswith("image/"):
                     if mime_type == "image/wmf":
                         try:
@@ -423,9 +469,13 @@ class BFTQRCodeReader:
                     if temp_png_path and os.path.exists(temp_png_path):
                         os.remove(temp_png_path)
                     continue
+                try:
+                    has_alpha, image_with_alpha = self.see_through_check(image_path)
+                except Exception as e:
+                    logger.debug(f"Failed to check for alpha channel {e}")
 
                 # Check if the image is a solid color
-                if np.all(image == image[0, 0]):
+                if np.all(image == image[0, 0]) and not has_alpha:
                     logger.warning("Image is a solid color, skipping")
                     if temp_png_path and os.path.exists(temp_png_path):
                         os.remove(temp_png_path)
@@ -495,6 +545,31 @@ class BFTQRCodeReader:
                             ("Scale Image 6.0", self.scale_image_with_aspect_ratio(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), scale_factor=6.0)),
                         ]
                     )
+                if image.shape[0] > 500 or image.shape[1] > 500:
+                    methods.extend(
+                        [
+                            (
+                                "Scale Image 0.25",
+                                self.scale_image_with_aspect_ratio(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), scale_factor=0.25),
+                            ),
+                        ]
+                    )
+                if image.shape[0] > 1000 or image.shape[1] > 1000:
+                    methods.extend(
+                        [
+                            (
+                                "Scale Image 0.10",
+                                self.scale_image_with_aspect_ratio(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), scale_factor=0.10),
+                            ),
+                        ]
+                    )
+                if has_alpha:
+                    methods.extend(
+                        [
+                            ("Invisalign", self.will_needs_invisalign(image_with_alpha)),
+                        ]
+                    )
+
                 if roid_image is not None and roid_image.size > 0:
                     roid_methods = [
                         ("Original", roid_image),
