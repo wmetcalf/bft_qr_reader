@@ -59,6 +59,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/upload/")
+@app.post("/qr/upload/")
 async def upload_file(file: UploadFile = File(...)):
     if not hasattr(app.state, "qr_code_reader"):
         logger.error("QR code reader is not initialized in app.state!")
