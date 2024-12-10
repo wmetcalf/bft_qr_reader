@@ -161,6 +161,8 @@ class BFTQRCodeReader:
         if decoded_texts:
             if len(decoded_texts) == 1 and not decoded_texts[0]:
                 return success
+            if all(text is None for text in decoded_texts):
+                return success
             else:
                 decoded_text = " ".join([text for text in decoded_texts if text is not None])
                 # print(f"Decoded text (qrreader): {decoded_text}")
@@ -410,6 +412,29 @@ class BFTQRCodeReader:
 
         invisalign_bgr = cv2.cvtColor(invisalign, cv2.COLOR_RGB2BGR)
         return invisalign_bgr
+    
+    def expand_canvas_and_copy_qr(self, image, bbox, confidence):
+        if confidence > 0.75:
+            x1, y1, x2, y2 = map(int, bbox)
+            qr_region = image[y1:y2, x1:x2]
+            qr_height, qr_width = qr_region.shape[:2]
+            canvas_height = 3 * qr_height
+            canvas_width = 3 * qr_width
+            canvas = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+            start_y = qr_height
+            start_x = qr_width
+            canvas[start_y:start_y+qr_height, start_x:start_x+qr_width] = qr_region
+            canvas[:qr_height, :qr_width] = qr_region
+            canvas[:qr_height, start_x:start_x+qr_width] = qr_region
+            canvas[:qr_height, -qr_width:] = qr_region
+            canvas[start_y:start_y+qr_height, :qr_width] = qr_region
+            canvas[start_y:start_y+qr_height, -qr_width:] = qr_region
+            canvas[-qr_height:, :qr_width] = qr_region
+            canvas[-qr_height:, start_x:start_x+qr_width] = qr_region
+            canvas[-qr_height:, -qr_width:] = qr_region
+            return canvas
+        else:
+            return image 
 
     def enhance_and_decode(self, path, output_dir, bft, save_matched=False):
         self.results = []
@@ -438,6 +463,8 @@ class BFTQRCodeReader:
                 image_copy = None
                 grey = None
                 has_alpha = False
+                have_expanded_image = False
+                expanded_image = None
                 if mime_type.startswith("image/"):
                     if mime_type == "image/wmf":
                         try:
@@ -493,6 +520,7 @@ class BFTQRCodeReader:
                         qr_detections = self.qreader.detect(self.scale_image_with_aspect_ratio(image, scale_factor=4.0), is_bgr=True)
                         if qr_detections is not None:
                             image_copy = self.scale_image_with_aspect_ratio(image, scale_factor=4.0)
+
                     except:
                         logger.debug(f"failed to detect qrcode {e} with scale for small image")
                         logger.debug(traceback.format_exc())
@@ -500,9 +528,15 @@ class BFTQRCodeReader:
                     if qr_detections is not None:
                         if not image_copy:
                             image_copy = image.copy()
+                        image_copy2 = image.copy()
                         image.setflags(write=False)
                         roid_image = self.detect_and_remove_logo_by_grid(image_copy, qr_detections)
                         have_roids = True
+                        bbox = qr_detections[0]['bbox_xyxy']
+                        confidence = qr_detections[0]['confidence']
+                        if confidence > 0.75:
+                            expanded_image = self.expand_canvas_and_copy_qr(image_copy2, bbox, confidence)
+                            have_expanded_image = True
                 except Exception as e:
                     logger.warning(f"Failed to generate ROID image {e}")
                 successful_methods = []
@@ -555,6 +589,7 @@ class BFTQRCodeReader:
                             ),
                         ]
                     )
+
                 if image.shape[0] > 1000 or image.shape[1] > 1000:
                     methods.extend(
                         [
@@ -570,7 +605,37 @@ class BFTQRCodeReader:
                             ("Invisalign", self.will_needs_invisalign(image_with_alpha)),
                         ]
                     )
-
+                if have_expanded_image:
+                    methods.extend(
+                            [
+                                ("Tiled Image", expanded_image),
+                            ]
+                        )
+                    if expanded_image.shape[0] > 1000 or expanded_image.shape[1] > 1000:
+                        methods.extend(
+                            [
+                                (
+                                    "Scale Image Tiled 0.10",
+                                    self.scale_image_with_aspect_ratio(expanded_image, scale_factor=0.10),
+                                ),
+                            ]
+                        )
+                    if expanded_image.shape[0] < 100 or expanded_image.shape[1] < 100:
+                        methods.extend(
+                            [
+                                ("Scale  Tiled Image 4.0", self.scale_image_with_aspect_ratio(cv2.cvtColor(expanded_image, cv2.COLOR_BGR2GRAY), scale_factor=4.0)),
+                                ("Scale Tiled Image 6.0", self.scale_image_with_aspect_ratio(cv2.cvtColor(expanded_image, cv2.COLOR_BGR2GRAY), scale_factor=6.0)),
+                            ]
+                        )
+                    if expanded_image.shape[0] > 500 or expanded_image.shape[1] > 500:
+                        methods.extend(
+                            [
+                                (
+                                    "Scale Tiled Image 0.25",
+                                    self.scale_image_with_aspect_ratio(cv2.cvtColor(expanded_image, cv2.COLOR_BGR2GRAY), scale_factor=0.25),
+                                ),
+                            ]
+                        )                        
                 if roid_image is not None and roid_image.size > 0:
                     roid_methods = [
                         ("Original", roid_image),
