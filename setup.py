@@ -7,7 +7,7 @@ setup(
     install_requires=[
         'opencv-python',
         'opencv-contrib-python',
-        'zxing-cpp',
+        'zxing-cpp==2.2.0',
         'fastapi',
         'uvicorn',
         'python-magic',
